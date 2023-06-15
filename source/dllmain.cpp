@@ -716,31 +716,30 @@ std::filesystem::path GetFileName(auto lpFilename)
     {
         auto absolutePath = std::filesystem::absolute(filePath);
         auto relativePath = std::filesystem::relative(absolutePath, gamePath);
+        auto commonPath = gamePath;
 
-        if (starts_with(absolutePath, gamePath))
+        if (starts_with(relativePath, ".."))
         {
-            static std::vector<std::filesystem::path> redirectedPaths;
-            if (redirectedPaths.empty())
-            {
-                for (const auto& entry : std::filesystem::directory_iterator(gamePath, std::filesystem::directory_options::skip_permission_denied))
-                {
-                    if (std::filesystem::is_directory(entry))
-                        redirectedPaths.emplace_back(make_relative(entry, gamePath));
-                }
-            }
+            auto common = std::mismatch(absolutePath.begin(), absolutePath.end(), gamePath.begin());
+            for (auto& iter = common.second; iter != gamePath.end(); ++iter)
+                commonPath = commonPath.parent_path();
 
-            if (std::any_of(std::begin(redirectedPaths), std::end(redirectedPaths), [&](auto& it) { 
-                return starts_with(relativePath, it) || std::filesystem::path(absolutePath).remove_filename() == gamePath;
-            }))
+            std::filesystem::path rp;
+            for (auto& p : relativePath)
             {
-                auto newPath = filePath;
-                for (auto& p : relativePath)
-                    newPath = newPath.parent_path();
-                newPath = newPath / sFileLoaderPath.make_preferred() / relativePath;
-                if (std::filesystem::exists(newPath) && std::filesystem::is_regular_file(newPath))
-                    return newPath;
+                if (p != "..")
+                    rp = rp / p;
             }
+            relativePath = rp;
         }
+
+        if (starts_with(std::filesystem::path(absolutePath).remove_filename(), gamePath) || starts_with(std::filesystem::path(absolutePath).remove_filename(), commonPath))
+        {
+            auto newPath = gamePath / sFileLoaderPath.make_preferred() / relativePath;
+            if (std::filesystem::exists(newPath) && std::filesystem::is_regular_file(newPath))
+                return newPath;
+        }
+
     }
 
     return lpFilename;
@@ -756,7 +755,11 @@ HANDLE WINAPI CustomCreateFileA(LPCSTR lpFilename, DWORD dwAccess, DWORD dwShari
         LoadPluginsAndRestoreIAT((uintptr_t)_ReturnAddress());
         once = true;
     }
-    return ptrCreateFileA(GetFileName(lpFilename).string().c_str(), dwAccess, dwSharing, saAttributes, dwCreation, dwAttributes, hTemplate);
+
+    if (ptrCreateFileA)
+        return ptrCreateFileA(GetFileName(lpFilename).string().c_str(), dwAccess, dwSharing, saAttributes, dwCreation, dwAttributes, hTemplate);
+    else
+        return CreateFileA(GetFileName(lpFilename).string().c_str(), dwAccess, dwSharing, saAttributes, dwCreation, dwAttributes, hTemplate);
 }
 
 typedef HANDLE(WINAPI* tCreateFileW)(LPCWSTR lpFilename, DWORD dwAccess, DWORD dwSharing, LPSECURITY_ATTRIBUTES saAttributes, DWORD dwCreation, DWORD dwAttributes, HANDLE hTemplate);
@@ -769,7 +772,11 @@ HANDLE WINAPI CustomCreateFileW(LPCWSTR lpFilename, DWORD dwAccess, DWORD dwShar
         LoadPluginsAndRestoreIAT((uintptr_t)_ReturnAddress());
         once = true;
     }
-    return ptrCreateFileW(GetFileName(lpFilename).wstring().c_str(), dwAccess, dwSharing, saAttributes, dwCreation, dwAttributes, hTemplate);
+
+    if (ptrCreateFileW)
+        return ptrCreateFileW(GetFileName(lpFilename).wstring().c_str(), dwAccess, dwSharing, saAttributes, dwCreation, dwAttributes, hTemplate);
+    else
+        return CreateFileW(GetFileName(lpFilename).wstring().c_str(), dwAccess, dwSharing, saAttributes, dwCreation, dwAttributes, hTemplate);
 }
 
 DEFINE_GUID(CLSID_DirectInput, 0x25E609E0, 0xB259, 0x11CF, 0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00);
